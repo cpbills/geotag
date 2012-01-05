@@ -1,0 +1,18 @@
+this script is a few years old, born of necessity, even though there are
+likely dozens if not hundreds of time + image + coords pairing programs and
+scripts out there now.
+
+the existing (free) windows based program had a really cool concept of
+locating the nearest city/feature name and using that in the tags.
+
+unfortunately, it would wipe all other exif tags from the image, and that
+was not good... so i wrote this.
+
+features:
+seconds offset definable in code (config file coming?)
+timezone / gmt offset configurable
+finds nearest city/location and adds exif info
+takes other exif info, and creates tags for it (lens, camera, etc)
+
+possibly more, it's been a long while since i touched this code... i'll be
+lucky if the place-name lookup still functions...
