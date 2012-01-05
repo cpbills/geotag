@@ -122,7 +122,6 @@ foreach my $image (@IMAGES) {
             ($dist)  = $location =~ /<distance>(.*?)</i;
         }
         sleep $NICE;
-        
     }
     if (($dist ne '') and ($name1 ne '') and ($name2 ne '')) {
         $headline = sprintf("%.2fkm from %s, %s",$dist,$name1,$name2);
@@ -176,7 +175,7 @@ sub setexif {
 # Headline - XKm from Place
 # GPSAltitude
 # GPSAltitudeRef 0/1 0 = above sea level, 1 = below sea level
-# GPSLatitude 
+# GPSLatitude
 # GPSLatitudeRef N/S
 # GPSLongitude
 # GPSLongitudeRef E/W
@@ -202,11 +201,11 @@ sub setexif {
     }
 
     push @keywords,$$info{Model} if ($$info{Model});
-    
+
     # Adobe Lightroom likes to put keywords in 'subject' as well.
     push @keywords,split(/,/,$$info{subject}) if ($$info{subject});
     push @keywords,split(/,/,$$info{Subject}) if ($$info{Subject});
-    
+
     my %dupe = ();
 
     # remove any previous 'geo:' tags from the list
@@ -277,8 +276,8 @@ sub imagets {
 # to work with other cameras, work may need to be done here.
 # DateTimeOriginal = 'YYYY:MM:DD HH:MM:SS.SS-XX:XX'
     my $image = shift;
-    
     my $exif = ImageInfo($image);
+
     $$exif{DateTimeOriginal} =~
         /([0-9]+):([0-9]+):([0-9]+)\s+([0-9]+):([0-9]+):([0-9]+)/;
     my $stamp = mktime($6,($5-$MERR),($4-$GMT),$3,$2-1,$1-1900,0,0,0);
@@ -288,7 +287,7 @@ sub imagets {
 
 sub readingpx {
     my @files = @_;
-    
+
     my %points = ();
     foreach my $file (@files) {
         open GPX,$file;
@@ -306,7 +305,6 @@ sub readingpx {
             # this regex may fail if your GPSr doesn't record time as:
             # 'YYYY-MM-DDTHH:MM:SSZ', where T and Z are literal
             $time =~ /([0-9]+)-([0-9]+)-([0-9]+).([0-9]+):([0-9]+):([0-9]+)/;
-                    
 
             # convert human readable time to unix timestamp,
             # this will make finding the closest match much easier.
