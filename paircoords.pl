@@ -14,34 +14,42 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
-
-use POSIX 'mktime';
-
 use strict;
 use warnings;
 
 use Image::ExifTool 'ImageInfo';
+use POSIX 'mktime';
 use Getopt::Long;
 use LWP::UserAgent;
+use XML::Simple;
 
+# set to non-zero to perform a flush after every write to STDOUT
+# allows you to print "status message..." then after time, "OK\n"
 $| = 42;
 
-# GMT offset, Eastern = -5, etc.
-# Check your camera and your gps, to be sure,
-# you may have forgotten about DST, or something
-# else might be wonky.
-my $GMT     = -4;
+my %cli_opts = ();
+Getopt::Std::getopts('c:s:d:t:',\%cli_opts);
 
-# Number of minutes your camera is off from the GPSr.
-# if your camera reads 5:04 and your GPSr reads 5:00
-# enter '4', if your camera reads 4:56 enter '-4'
-my $MERR    = 3;
+my $options_file = $cli_opts{c} || "${HOME}/.paircoords.conf";
 
-my $MAXTS   = 900;              # Maximum number of seconds to match timestamps
-my $LOC     = 1;                # Perform HTTP request to get location name
-my $MAXTRY  = 10;               # Attempts to get location name
-my $NICE    = 10;               # Number of seconds to sleep between requests
-my $FTMETER = 3.2808399;        # number of feet in a meter
+my $options = read_options("$options_file");
+
+# over-ride config file definitions with what was provided on the command line
+$$options{'gpx_dir'} = $cli_opts{t} if ($cli_opts{t});
+$$options{'src_dir'} = $cli_opts{s} if ($cli_opts{s});
+$$optiosn{'dst_dir'} = $cli_opts{d} if ($cli_opts{d});
+
+unless (verify_options($options)) {
+    print STDERR "required options not provided\n";
+    exit 1;
+}
+
+# Total seconds offset:
+# ADDING this value to the timestamp of a photo will give us the relative
+# time for the GPSr position at the time the photo was taken.
+my $OFFSET = ($GPS_GMT - $CAM_GMT) * 3600 + $SYNC;
+print $OFFSET,"\n"; exit;
+
 
 if (scalar(@ARGV) < 4) {
     # minimum arguments are 'paircoords.pl -g track.gpx -i image.jpg'
@@ -60,7 +68,7 @@ my $result = GetOptions(
             'img=s'     =>  \@IMGOPT,
             'minute=i'  =>  \$MERR,
             'sec=i'     =>  \$MAXTS,
-            'hours=i'   =>  \$GMT
+            'hours=i'   =>  \$OFFSET
 ) or help();
 
 @GPXOPT = split(/,/,join(',',@GPXOPT));
@@ -121,7 +129,7 @@ foreach my $image (@IMAGES) {
             ($name3) = $location =~ /<adminname2>(.*?)</i;
             ($dist)  = $location =~ /<distance>(.*?)</i;
         }
-        sleep $NICE;
+        sleep $DELAY;
     }
     if (($dist ne '') and ($name1 ne '') and ($name2 ne '')) {
         $headline = sprintf("%.2fkm from %s, %s",$dist,$name1,$name2);
@@ -164,7 +172,7 @@ sub getplace {
             return $res->content;
         }
         print ".";
-        sleep $NICE;
+        sleep $DELAY;
     }
     print " failure!\n";
     return 0;
@@ -306,7 +314,7 @@ sub imagets {
 
     $$exif{DateTimeOriginal} =~
         /([0-9]+):([0-9]+):([0-9]+)\s+([0-9]+):([0-9]+):([0-9]+)/;
-    my $stamp = mktime($6,($5-$MERR),($4-$GMT),$3,$2-1,$1-1900,0,0,0);
+    my $stamp = mktime($6,($5-$MERR),($4-$OFFSET),$3,$2-1,$1-1900,0,0,0);
     return $stamp;
 }
 
