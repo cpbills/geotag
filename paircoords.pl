@@ -270,6 +270,32 @@ sub correlate {
     }
 }
 
+sub read_options {
+    my $config  = shift;
+
+    my %options = ();
+
+    if (open FILE,'<',$config) {
+        while (<FILE>) {
+            my $line = $_;
+            $line =~ s/^\s+//;
+            $line =~ s/\s+$//;
+            next if ($line =~ /^#/);
+            next if ($line =~ /^$/);
+
+            my ($option,$value) = split(/\s+/,$line,2);
+            if ($options{$option}) {
+                print "WARN: option $option previously defined in config\n";
+            }
+            $options{$option} = $value;
+        }
+        close FILE;
+    } else {
+        print STDERR "could not open file: $config: $!\n";
+    }
+    return \%options;
+}
+
 sub imagets {
 # reads exif time from image, returns adjusted unix timestamp
 # The format I have in my photos is specified below, and for this
