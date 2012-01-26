@@ -25,8 +25,6 @@ use XML::Simple;
 use Date::Parse;
 use File::Copy;
 
-use Data::Dumper;
-
 # set to non-zero to perform a flush after every write to STDOUT
 # allows you to print "status message..." then after time, "OK\n"
 $| = 42;
@@ -183,9 +181,6 @@ sub write_exif {
 
     my $exiftool = new Image::ExifTool;
     my $exif = $exiftool->ImageInfo("$filename");
-#    # 'wipe out' old keywords...?
-#    $exiftool->SetNewValue('Keywords',undef);
-#    print "$$exif{Keywords}\n"; #debug
 
     if ($$img_data{lat} && $$img_data{lon}) {
         my $lat = $$img_data{lat};
@@ -213,6 +208,9 @@ sub write_exif {
             delete $$img_data{tags}{lc($tag)};
         }
     }
+    # 'wipe out' old keywords... not sure this is needed
+    $exiftool->SetNewValue('Keywords',undef);
+
     # set our keywords... we have to loop through these instead of doing
     # a 'join' and making one large string, because this function seems to
     # have a string length limit.
@@ -233,7 +231,6 @@ sub query_geonames {
     my $url  = "$base?lat=$$img_data{lat}&lng=$$img_data{lon}";
        $url .= '&radius=100&maxRows=1&style=FULL';
 
-    print "$url\n";
     my $success = 0;
     for (1 .. $retry) {
         last if ($success);
