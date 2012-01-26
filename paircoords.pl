@@ -18,265 +18,355 @@ use strict;
 use warnings;
 
 use Image::ExifTool 'ImageInfo';
-use POSIX 'mktime';
-use Getopt::Long;
+use Getopt::Std;
 use LWP::UserAgent;
+use HTTP::Request;
 use XML::Simple;
+use Date::Parse;
+use File::Copy;
+
+use Data::Dumper;
 
 # set to non-zero to perform a flush after every write to STDOUT
 # allows you to print "status message..." then after time, "OK\n"
 $| = 42;
+my $VERBOSE = 0;
+my $config_name = "paircoords.conf";
+my @config_path = ( "/etc/${config_name}",
+                    "$ENV{HOME}/.${config_name}",
+                    "./${config_name}" );
+my $options_file = '';
+foreach my $config (@config_path) {
+    $options_file = $config if (-e "$config" && -r "$config");
+}
 
+# command line options are:
+# -c <config file>
+# -s <source image directory>
+# -d <destination image directory>
+# -t <tracks/gpx file directory>
+# -v : verbose output
 my %cli_opts = ();
-Getopt::Std::getopts('c:s:d:t:',\%cli_opts);
+Getopt::Std::getopts('c:s:d:t:v',\%cli_opts);
 
-my $options_file = $cli_opts{c} || "${HOME}/.paircoords.conf";
-
+$options_file = $cli_opts{c} if ($cli_opts{c});
 my $options = read_options("$options_file");
 
 # over-ride config file definitions with what was provided on the command line
-$$options{'gpx_dir'} = $cli_opts{t} if ($cli_opts{t});
-$$options{'src_dir'} = $cli_opts{s} if ($cli_opts{s});
-$$optiosn{'dst_dir'} = $cli_opts{d} if ($cli_opts{d});
+$$options{gpx_dir} = $cli_opts{t} if ($cli_opts{t});
+$$options{src_dir} = $cli_opts{s} if ($cli_opts{s});
+$$options{dst_dir} = $cli_opts{d} if ($cli_opts{d});
+$VERBOSE = 1 if ($cli_opts{v});
 
-unless (verify_options($options)) {
+if (verify_options($options)) {
     print STDERR "required options not provided\n";
     exit 1;
 }
 
-# Total seconds offset:
-# ADDING this value to the timestamp of a photo will give us the relative
-# time for the GPSr position at the time the photo was taken.
-my $OFFSET = ($GPS_GMT - $CAM_GMT) * 3600 + $SYNC;
-print $OFFSET,"\n"; exit;
+# initiate an empty hash reference for holding our coordinate data
+my $coords = {};
 
-
-if (scalar(@ARGV) < 4) {
-    # minimum arguments are 'paircoords.pl -g track.gpx -i image.jpg'
-    help();
+# open the directory containing the gpx files, and loop through each file
+if (opendir GPX_DIR,"$$options{gpx_dir}") {
+    print "reading in gpx files..." if ($VERBOSE);
+    foreach my $file (grep { /\.gpx$/i } readdir GPX_DIR) {
+        read_tracks("$$options{gpx_dir}/$file",$coords);
+    }
+    print " done\n" if ($VERBOSE);
+    closedir GPX_DIR;
+} else {
+    print STDERR "unable to open GPX dir: $$options{gpx_dir}: $!\n";
+    exit 1;
 }
-foreach my $arg (@ARGV) {
-    # catch any attempt to get help
-    help() if ($arg =~ /-help/i);
-}
 
-my @GPXOPT = ();
-my @IMGOPT = ();
+# calculate the total seconds difference
+my $offset = (($$options{camera_gmt} - $$options{gps_gmt}) * 60 * 60) +
+                $$options{sync_seconds};
 
-my $result = GetOptions(
-            'gpx=s'     =>  \@GPXOPT,
-            'img=s'     =>  \@IMGOPT,
-            'minute=i'  =>  \$MERR,
-            'sec=i'     =>  \$MAXTS,
-            'hours=i'   =>  \$OFFSET
-) or help();
+if (opendir SRC_DIR,"$$options{src_dir}") {
+    foreach my $image (grep { /\.jpe?g$/i } readdir SRC_DIR) {
+        my $exiftool = new Image::ExifTool;
+        my $exif = $exiftool->ImageInfo("$$options{src_dir}/$image");
+        # get the timestamp from the image and add offset to pair with gps
+        my $image_ts = str2time($$exif{DateTimeOriginal}) + $offset;
 
-@GPXOPT = split(/,/,join(',',@GPXOPT));
-@IMGOPT = split(/,/,join(',',@IMGOPT));
-
-my @TRACKS = ();
-my @IMAGES = ();
-my $FAIL = 0;
-
-foreach my $GPX (@GPXOPT) {
-    if (-d $GPX) {
-        $GPX =~ s/\/$//;
-        opendir DIR,$GPX;
-        my @GPXDIR = grep { /\.gpx$/i } readdir DIR;
-        closedir DIR;
-        foreach my $gpx (@GPXDIR) {
-            push(@TRACKS,"$GPX/$gpx");
+        print "finding location: $$options{src_dir}/$image ..." if ($VERBOSE);
+        my ($lat,$lon,$ele,$fuzz) = (0,0,0);
+        for my $fuzzy (0 .. $$options{error_margin}) {
+            unless ($lat && $lon && $ele) {
+                ($lat,$lon,$ele) = get_location($image_ts-$fuzzy,$coords);
+                $fuzz = "-$fuzzy" if ($lat && $lon);
+            }
+            unless ($lat && $lon && $ele) {
+                ($lat,$lon,$ele) = get_location($image_ts+$fuzzy,$coords);
+                $fuzz = "+$fuzzy" if ($lat && $lon);
+            }
         }
-    } elsif (-e $GPX) {
-        push(@TRACKS,$GPX);
-    } else {
-        print "$GPX not found\n";
-        $FAIL = 1;
-    }
-}
-
-foreach my $IMG (@IMGOPT) {
-    if (-d $IMG) {
-        $IMG =~ s/\/$//;
-        opendir DIR,$IMG;
-        my @IMGDIR = grep { /\.jpe?g$/i } readdir DIR;
-        closedir DIR;
-        foreach my $img (@IMGDIR) {
-            push(@IMAGES,"$IMG/$img");
+        if ($lat && $lon) {
+            print " found! $fuzz seconds off\n" if ($VERBOSE);
+        } else {
+            print " not found!\n" if ($VERBOSE);
         }
-    } elsif (-e $IMG) {
-        push(@IMAGES,$IMG);
-    } else {
-        print "$IMG not found\n";
-        $FAIL = 1;
-    }
-}
-help() if ($FAIL);
+        # create an empty hash reference to hold the information
+        my $img_data = {};
 
-my $points = readingpx(@TRACKS);
+        # store the coords in our Really Awesome Hash Ref (tm)
+        $$img_data{lat} = $lat;
+        $$img_data{lon} = $lon;
+        $$img_data{ele} = $ele;
 
-foreach my $image (@IMAGES) {
-    my $ts = imagets($image);
-    my ($lat,$lon,$ele,$offset) = correlate($points,$ts);
-    my ($name1,$name2,$name3,$dist,$headline) = ('','','','','');
-    my @tags = ();
+        # grab all possible existing tags, then insert into our hash
+        my $tags = '';
+        $tags = join(',',$tags,$$exif{Keywords}) if ($$exif{Keywords});
+        $tags = join(',',$tags,$$exif{keywords}) if ($$exif{keywords});
+        $tags = join(',',$tags,$$exif{Subject}) if ($$exif{Subject});
+        $tags = join(',',$tags,$$exif{subject}) if ($$exif{subject});
 
-    if ($LOC and ($lat and $lon)) {
-        my $location = getplace($lat,$lon);
-        if ($location) {
-            ($name1) = $location =~ /<name>(.*?)</i;
-            ($name2) = $location =~ /<adminname1>(.*?)</i;
-            ($name3) = $location =~ /<adminname2>(.*?)</i;
-            ($dist)  = $location =~ /<distance>(.*?)</i;
+        foreach my $tag (split(/,/,$tags)) {
+            $tag =~ s/\s+$//;
+            $tag =~ s/^\s+//;
+            next if ($tag =~ /^$/);
+            $$img_data{tags}{$tag} = 1;
         }
-        sleep $DELAY;
-    }
-    if (($dist ne '') and ($name1 ne '') and ($name2 ne '')) {
-        $headline = sprintf("%.2fkm from %s, %s",$dist,$name1,$name2);
-    } elsif ($lat and $lon) {
-        $headline = "Taken at $lat, $lon";
-    } else {
-        $headline = "No reliable GPS data";
-    }
-    print "$image $headline\n";
-    push @tags,$name1 if ($name1 ne '');
-    push @tags,$name2 if ($name2 ne '');
-    push @tags,$name3 if ($name3 ne '');
-    push @tags,("geotagged","geo:lat=$lat","geo:lon=$lon") if ($lat and $lon);
 
-    setexif($image,$lat,$lon,$ele,$headline,\@tags);
+        # grab and format the camera details from exif
+        if ($$options{camera_info}) {
+            my $lens = $$exif{Lens} if ($$exif{Lens});
+            # 70.0-200.0 nooo! 70-200, yes!
+            $lens =~ s/\.0//g;
+            $lens =~ s/\ mm/mm/g;
+            $$img_data{tags}{$lens} = 1;
+
+            my $model = lc($$exif{Model}) if ($$exif{Model});
+            $model =~ s/\b([a-z])/uc($1)/ge;
+            $$img_data{tags}{$model} = 1;
+        }
+
+        # perform our geocoding searches, if we have the data
+        if ($$img_data{lat} && $$img_data{lon}) {
+            if ($$options{geonames}) {
+                query_geonames($img_data,$$options{retry},$$options{sleep});
+            }
+            if ($$options{google}) {
+                query_google($img_data,$$options{retry},$$options{sleep});
+            }
+            sleep $$options{sleep};
+        }
+
+        # finally, write all this junk into the EXIF header of the image
+        write_exif($img_data,$image,$options);
+    }
+    closedir SRC_DIR;
+} else {
+    print STDERR "could not open source directory: $$options{src_dir}: $!\n";
+    exit 1;
 }
 
 exit;
 
-sub help {
-    print "HELP CALLED!\n";
-    exit;
+sub write_exif {
+    my $img_data    = shift;
+    my $image       = shift;
+    my $options     = shift;
+
+    my $filename = "$$options{src_dir}/$image";
+    unless ($$options{in_place} || ($$options{src_dir} eq $$options{dst_dir})) {
+        mkdir $$options{dst_dir} unless (-d $$options{dst_dir});
+        copy("$$options{src_dir}/$image","$$options{dst_dir}/$image");
+        $filename = "$$options{dst_dir}/$image";
+    }
+
+    # clean up / remove any old geo tag information
+    foreach my $key (keys %{$$img_data{tags}}) {
+        delete $$img_data{tags}{$key} if ($key =~ /^geo:/);
+    }
+
+    my $exiftool = new Image::ExifTool;
+    my $exif = $exiftool->ImageInfo("$filename");
+#    # 'wipe out' old keywords...?
+#    $exiftool->SetNewValue('Keywords',undef);
+#    print "$$exif{Keywords}\n"; #debug
+
+    if ($$img_data{lat} && $$img_data{lon}) {
+        my $lat = $$img_data{lat};
+        my $lon = $$img_data{lon};
+        my $ele = $$img_data{ele};
+
+        my $latref = ($lat > 0)?"N":"S";
+        my $lonref = ($lon > 0)?"E":"W";
+        my $altref = ($ele < 0)?0:1;
+
+        $$img_data{tags}{geotagged} = 1;
+        $$img_data{tags}{"geo:lat=$lat"} = 1;
+        $$img_data{tags}{"geo:lon=$lon"} = 1;
+
+        $exiftool->SetNewValue('GPSAltitude',abs($ele),Type => 'ValueConv');
+        $exiftool->SetNewValue('GPSAltitudeRef',$altref,Type => 'ValueConv');
+        $exiftool->SetNewValue('GPSLongitude',abs($lon),Type => 'ValueConv');
+        $exiftool->SetNewValue('GPSLongitudeRef',$lonref,Type => 'ValueConv');
+        $exiftool->SetNewValue('GPSLatitude',abs($lat),Type => 'ValueConv');
+        $exiftool->SetNewValue('GPSLatitudeRef',$latref,Type => 'ValueConv');
+    }
+    foreach my $tag (keys %{$$img_data{tags}}) {
+        # remove any duplicate lowercased tags
+        if (($$img_data{tags}{lc($tag)}) && $tag ne lc($tag)) {
+            delete $$img_data{tags}{lc($tag)};
+        }
+    }
+    # set our keywords... we have to loop through these instead of doing
+    # a 'join' and making one large string, because this function seems to
+    # have a string length limit.
+    foreach my $tag (keys %{$$img_data{tags}}) {
+        $exiftool->SetNewValue('Keywords',$tag);
+    }
+    $exiftool->WriteInfo("$filename");
 }
 
-sub getplace {
-# example geonames.org query:
-# http://ws.geonames.org/findNearbyPlaceName?lat=41.1365&lng=-83.6601&style=FULL
-    my $lat = shift;
-    my $lon = shift;
+sub query_geonames {
+    # example geonames.org query:
+    # http://ws.geonames.org/findNearbyPlaceName?lat=41.1365&lng=-83.6601&style=FULL
+    my $img_data    = shift;
+    my $retry       = shift;
+    my $sleep       = shift;
 
-    my $base    = 'http://ws.geonames.org/findNearbyPlaceName';
-    my $place   = "$base?lat=$lat&lng=$lon&radius=100&maxRows=1&style=FULL";
-    my $ua = LWP::UserAgent->new(timeout => 30);
-    print "Aquiring placename for $lat, $lon";
-    for my $i (0 .. $MAXTRY) {
-        my $req = HTTP::Request->new(GET => $place);
-        my $res = $ua->request($req);
-        if ($res->is_success) {
-            print " success!\n";
-            return $res->content;
+    my $base = 'http://ws.geonames.org/findNearbyPlaceName';
+    my $url  = "$base?lat=$$img_data{lat}&lng=$$img_data{lon}";
+       $url .= '&radius=100&maxRows=1&style=FULL';
+
+    print "$url\n";
+    my $success = 0;
+    for (1 .. $retry) {
+        last if ($success);
+        my $content = http_get("$url");
+        if ($content) {
+            my $xml = new XML::Simple (ForceArray => 1);
+            my $infos = $xml->XMLin($content);
+               $infos = $$infos{geoname}[0];
+            $$img_data{geonames}{distance} = $$infos{distance}[0];
+            $$img_data{geonames}{locality} = $$infos{name}[0];
+            $$img_data{geonames}{state} = $$infos{adminName1}[0];
+            $$img_data{geonames}{county} = $$infos{adminName2}[0];
+            $$img_data{geonames}{country} = $$infos{countryName}[0];
+            $$img_data{timezone} = $$infos{timezone}[0]{content};
+            $success = 1;
         }
-        print ".";
-        sleep $DELAY;
+        print "geonames failed!\n" if ($VERBOSE && !$success);
+        sleep $sleep unless ($success);
     }
-    print " failure!\n";
+}
+
+sub query_google {
+    # example query:
+    # http://maps.googleapis.com/maps/api/geocode/xml?latlng=34.520994,-117.308356&sensor=false
+    my $img_data    = shift;
+    my $retry       = shift;
+    my $sleep       = shift;
+
+    my @pois = qw(establishment point_of_interest park natural_feature);
+    my $base = 'http://maps.googleapis.com/maps/api/geocode/xml';
+    my $url = "$base?latlng=$$img_data{lat},$$img_data{lon}&sensor=false";
+
+    my $success = 0;
+    for (1 .. $retry) {
+        last if ($success);
+        my $content = http_get("$url");
+        if ($content) {
+            my $xml = new XML::Simple (ForceArray => 1);
+            my $infos = $xml->XMLin($content);
+               $infos = $$infos{result}[0];
+            $$img_data{google}{address} = $$infos{formatted_address}[0];
+            foreach my $piece (@{$$infos{address_component}}) {
+                my $name = $$piece{long_name}[0];
+                my $type = $$piece{type}[0];
+                my $poi = 0;
+                foreach my $poi_type (@pois) {
+                    if ($type =~ /$poi_type/i) {
+                        $$img_data{tags}{$name} = 1;
+                    }
+                }
+                $$img_data{google}{$type} = $name;
+            }
+            $success = 1;
+        }
+        print "google failed!\n" if ($VERBOSE && !$success);
+        sleep $sleep unless ($success);
+    }
+}
+
+sub get_location {
+    my $time    =   shift;
+    my $coords  =   shift;
+
+    if ($$coords{$time}{lat} && $$coords{$time}{lon} && $$coords{$time}{ele}) {
+        return ($$coords{$time}{lat},$$coords{$time}{lon},$$coords{$time}{ele});
+    } else {
+        return (0,0,0);
+    }
+}
+
+sub http_get {
+    my $url     = shift;
+
+    my $browser = new LWP::UserAgent;
+       $browser->timeout(10);
+       $browser->requests_redirectable(['POST','GET','HEAD']);
+    my $request = new HTTP::Request('GET',"$url");
+    my $response = $browser->request($request);
+
+    if ($response->is_success) {
+        return $response->content;
+    }
     return 0;
 }
 
-sub setexif {
-# EXIF tags we're going to set with this:
-# Headline - XKm from Place
-# GPSAltitude
-# GPSAltitudeRef 0/1 0 = above sea level, 1 = below sea level
-# GPSLatitude
-# GPSLatitudeRef N/S
-# GPSLongitude
-# GPSLongitudeRef E/W
-# GPSPosition 'lat,lon'
-    my ($image,$lat,$lon,$ele,$hl,$tags) = @_;
+sub read_tracks {
+    # slurp each file in with XML::Simple and then process the track segments
+    # to populate a hash for future lookup against photo timestamps.
+    my $file        =   shift;
+    my $coord_hash  =   shift;
 
-    my $latref = ($lat > 0)?"N":"S";
-    my $lonref = ($lon > 0)?"E":"W";
-    my $altref = ($ele < 0)?0:1;
-
-    my $exif = new Image::ExifTool;
-    my $info = $exif->ImageInfo($image);
-
-    my @keywords = ();
-    push @keywords,split(/,/,$$info{Keywords}) if ($$info{Keywords});
-    push @keywords,split(/,/,$$info{keywords}) if ($$info{keywords});
-
-    if ($$info{Lens}) {
-        my $lens = $$info{Lens};
-        # 70.0-200.0 lens? nooo! 70-200, yes!
-        $lens = s/\\.0//g;
-        push @keywords,$lens;
-    }
-
-    push @keywords,$$info{Model} if ($$info{Model});
-
-    # Adobe Lightroom likes to put keywords in 'subject' as well.
-    push @keywords,split(/,/,$$info{subject}) if ($$info{subject});
-    push @keywords,split(/,/,$$info{Subject}) if ($$info{Subject});
-
-    my %dupe = ();
-
-    # remove any previous 'geo:' tags from the list
-    foreach my $keyword (@keywords) {
-        $keyword =~ s/^\s*//;
-        $keyword =~ s/\s*$//;
-        $dupe{lc($keyword)} = 1 unless ($keyword =~ /geo:/);
-    }
-
-    # add new tags to the list
-    foreach my $keyword (@$tags) {
-        $keyword =~ s/^\s*//;
-        $keyword =~ s/\s*$//;
-        $dupe{lc($keyword)} = 1;
-    }
-    @keywords = keys %dupe;
-
-    # wipe out 'Keywords' to start fresh.
-    $exif->SetNewValue('Keywords',undef);
-
-    # append each keyword, separately
-    foreach my $keyword (@keywords) {
-        $exif->SetNewValue('Keywords',$keyword);
-    }
-
-    $exif->SetNewValue('Headline',$hl);
-    $exif->SetNewValue('GPSAltitude',abs($ele), Type => 'ValueConv');
-    $exif->SetNewValue('GPSAltitudeRef',$altref,Type => 'ValueConv');
-    $exif->SetNewValue('GPSLongitude',abs($lon), Type =>'ValueConv');
-    $exif->SetNewValue('GPSLongitudeRef',$lonref,Type =>'ValueConv');
-    $exif->SetNewValue('GPSLatitude',abs($lat), Type => 'ValueConv');
-    $exif->SetNewValue('GPSLatitudeRef',$latref,Type => 'ValueConv');
-    $exif->WriteInfo($image);
-}
-
-sub correlate {
-    my $points = shift;
-    my $timestamp = shift;
-
-    if (defined($$points{$timestamp}{lon})) {
-        return  $$points{$timestamp}{lat},
-                $$points{$timestamp}{lon},
-                $$points{$timestamp}{ele},
-                0;
-    } else {
-        for my $i (1 .. $MAXTS) {
-            if (defined($$points{$timestamp-$i}{lon})) {
-                return  $$points{$timestamp-$i}{lat},
-                        $$points{$timestamp-$i}{lon},
-                        $$points{$timestamp-$i}{ele},
-                        $i;
-
-            }
-            if (defined($$points{$timestamp+$i}{lon})) {
-                return  $$points{$timestamp+$i}{lat},
-                        $$points{$timestamp+$i}{lon},
-                        $$points{$timestamp+$i}{ele},
-                        $i;
-            }
+    # the ForceArray bit is needed to ensure that we can deal with
+    # GPX files that only have one track segment, and XML::Simple
+    # is tempted to just collapse it...
+    my $xml = new XML::Simple (ForceArray => 1);
+    my $tracks = $xml->XMLin($file);
+    my $segments = $$tracks{trk};
+    foreach my $segment (@$segments) {
+        my $points = $$segment{trkseg}[0]{trkpt};
+        foreach my $point (@$points) {
+            my $time = str2time($$point{time}[0]);
+            $$coord_hash{$time}{lat} = $$point{lat};
+            $$coord_hash{$time}{lon} = $$point{lon};
+            $$coord_hash{$time}{ele} = $$point{ele}[0];
         }
-        return 0,0,0,0;
     }
 }
+
+sub verify_options {
+    # really basic check to make sure we have directories specified and
+    # that they can be used for what we need them for. gives us a spot to
+    # check for something more complex if needed in the future.
+    my $option_hash = shift;
+    my $fail = 0;
+
+    foreach my $dir qw(src_dir gpx_dir) {
+        if ($$option_hash{$dir}) {
+            my $directory = $$option_hash{$dir};
+            if (! -d "$directory") {
+                print STDERR "$dir: \'$directory\' is not a directory\n";
+                $fail = 1;
+            } elsif (! -r "$directory") {
+                print STDERR "$dir: \'$directory\' is not readable\n";
+                $fail = 1;
+            }
+        } else {
+            print STDERR "$dir: not defined\n";
+            $fail = 1;
+        }
+    }
+    return $fail;
+}
+
 
 sub read_options {
     my $config  = shift;
@@ -302,54 +392,4 @@ sub read_options {
         print STDERR "could not open file: $config: $!\n";
     }
     return \%options;
-}
-
-sub imagets {
-# reads exif time from image, returns adjusted unix timestamp
-# The format I have in my photos is specified below, and for this
-# to work with other cameras, work may need to be done here.
-# DateTimeOriginal = 'YYYY:MM:DD HH:MM:SS.SS-XX:XX'
-    my $image = shift;
-    my $exif = ImageInfo($image);
-
-    $$exif{DateTimeOriginal} =~
-        /([0-9]+):([0-9]+):([0-9]+)\s+([0-9]+):([0-9]+):([0-9]+)/;
-    my $stamp = mktime($6,($5-$MERR),($4-$OFFSET),$3,$2-1,$1-1900,0,0,0);
-    return $stamp;
-}
-
-
-sub readingpx {
-    my @files = @_;
-
-    my %points = ();
-    foreach my $file (@files) {
-        open GPX,$file;
-        my @lines = <GPX>;
-        close GPX;
-        chomp(@lines);
-        my $content = join('',@lines);
-        my @points = $content =~ /<trkpt(.*?)<\/trkpt>/sig;
-        foreach my $point (@points) {
-            # GPSr should be using GMT for a timezone, code
-            # may need to be modified to allow for a non-GMT GPSr
-
-            my ($time) = $point =~ /<time>(.*?)<\/time>/i;
-
-            # this regex may fail if your GPSr doesn't record time as:
-            # 'YYYY-MM-DDTHH:MM:SSZ', where T and Z are literal
-            $time =~ /([0-9]+)-([0-9]+)-([0-9]+).([0-9]+):([0-9]+):([0-9]+)/;
-
-            # convert human readable time to unix timestamp,
-            # this will make finding the closest match much easier.
-            my $stamp = mktime($6,$5,$4,$3,$2-1,$1-1900,0,0,0);
-
-            ($points{$stamp}{lat}) = $point =~ /lat=['"](.*?)['"]/i;
-            ($points{$stamp}{lon}) = $point =~ /lon=['"](.*?)['"]/i;
-            ($points{$stamp}{ele}) = $point =~ /<ele>(.*?)<\/ele>/i;
-        }
-
-    }
-    # return a hash reference of all the points, keyed by unix timestamp
-    return \%points;
 }
