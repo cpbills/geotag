@@ -184,7 +184,7 @@ sub update_exif {
         $fl =~ s/\ mm/mm/;
         $$img_data{fl} = $fl;
     }
-    $$img_data{iso} = $$exif{ISO} if ($$exif{ISO});
+    $$img_data{iso} = "ISO $$exif{ISO}" if ($$exif{ISO});
 
     if ($$img_data{lat} && $$img_data{lon}) {
         my $lat = $$img_data{lat};
@@ -206,6 +206,21 @@ sub update_exif {
         $exiftool->SetNewValue('GPSLatitude',abs($lat),Type => 'ValueConv');
         $exiftool->SetNewValue('GPSLatitudeRef',$latref,Type => 'ValueConv');
     }
+    if ($$options{camera_info}) {
+        $$img_data{tags}{$$img_data{model}} = 1 if ($$img_data{model});
+        $$img_data{tags}{$$img_data{lens}} = 1 if ($$img_data{lens});
+    }
+    # include location data in tags
+    my @items = qw( country county state locality route postal_code
+                    administrative_area_level_1 administrative_area_level_3 );
+    foreach my $item (@items) {
+        if ($$img_data{google}{$item}) {
+            $$img_data{tags}{$$img_data{google}{$item}} = 1;
+        }
+        if ($$img_data{geonames}{$item}) {
+            $$img_data{tags}{$$img_data{geonames}{$item}} = 1;
+        }
+    }
     foreach my $tag (keys %{$$img_data{tags}}) {
         # remove any duplicate lowercased tags
         if (($$img_data{tags}{lc($tag)}) && $tag ne lc($tag)) {
@@ -214,13 +229,54 @@ sub update_exif {
     }
     # 'wipe out' old keywords... not sure this is needed
     $exiftool->SetNewValue('Keywords',undef);
-
     # set our keywords... we have to loop through these instead of doing
     # a 'join' and making one large string, because this function seems to
     # have a string length limit.
     foreach my $tag (keys %{$$img_data{tags}}) {
-        $exiftool->SetNewValue('Keywords',$tag);
+        $exiftool->SetNewValue('Keywords',"\"$tag\"");
     }
+    # start building the image description:
+    my $header = '';
+    # get wild and crazy and assume we have more data from geonames, if we
+    # have the distance... may need to re-visit and make this more 'strict'
+    if ($$img_data{geonames}{distance}) {
+        my $geonames = $$img_data{geonames};
+        my $distance = sprintf("%02.2gkm",$$geonames{distance});
+        $header .= "$distance from $$geonames{locality} in ";
+        $header .= "$$geonames{county}, $$geonames{state}\n";
+    }
+    if ($$img_data{google}{address}) {
+        $header .= "near $$img_data{google}{address}\n";
+    }
+    my $footer = '';
+    if ($$options{desc_camera}) {
+        $footer .= "$$img_data{model}" if ($$img_data{model});
+        $footer .= " + " if ($$img_data{model} && $$img_data{lens});
+        $footer .= "$$img_data{lens}" if ($$img_data{model});
+        if ($$img_data{lens} && $$img_data{fl}
+                    && ($$img_data{fl} ne $$img_data{lens})) {
+            $footer .= "@ $$img_data{fl}";
+        }
+    }
+    if ($$options{desc_exposure}) {
+        my @details = ();
+        push @details,$$img_data{shutter} if ($$img_data{shutter});
+        push @details,$$img_data{aperture} if ($$img_data{aperture});
+        push @details,$$img_data{iso} if ($$img_data{iso});
+        if (@details) {
+            $footer .= ' - ' if ($footer ne '');
+            $footer .= join(', ',@details);
+        }
+    }
+    $footer .= "\n" if ($footer ne '');
+    if ($$options{desc_copyright} && $$options{copyright}) {
+        $$options{copyright} =~ s/\\n/\n/g;
+        $footer .= "$$options{copyright}";
+    }
+    if ($header ne '' || $footer ne '') {
+        $exiftool->SetNewValue('Description',"$header\n\n$footer");
+    }
+
     $exiftool->WriteInfo("$filename");
 }
 
