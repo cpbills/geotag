@@ -30,9 +30,14 @@ use File::Copy;
 $| = 42;
 my $VERBOSE = 0;
 my $config_name = "paircoords.conf";
-my @config_path = ( "/etc/${config_name}",
-                    "$ENV{HOME}/.${config_name}",
-                    "./${config_name}" );
+my @config_path = ();
+if ($^O =~ /mswin/i) {
+    @config_path = ("./${config_name}");
+} else {
+    @config_path = ( "/etc/${config_name}",
+                     "$ENV{HOME}/.${config_name}",
+                     "./${config_name}" );
+}
 my $options_file = '';
 foreach my $config (@config_path) {
     $options_file = $config if (-e "$config" && -r "$config");
@@ -362,7 +367,7 @@ sub verify_options {
     my $option_hash = shift;
     my $fail = 0;
 
-    foreach my $dir qw(src_dir gpx_dir) {
+    foreach my $dir ('src_dir', 'gpx_dir') {
         if ($$option_hash{$dir}) {
             my $directory = $$option_hash{$dir};
             if (! -d "$directory") {
