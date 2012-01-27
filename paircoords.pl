@@ -54,7 +54,9 @@ my $options = read_options("$options_file");
 $$options{gpx_dir} = $cli_opts{t} if ($cli_opts{t});
 $$options{src_dir} = $cli_opts{s} if ($cli_opts{s});
 $$options{dst_dir} = $cli_opts{d} if ($cli_opts{d});
-$VERBOSE = 1 if ($cli_opts{v});
+$VERBOSE = $cli_opts{v} if ($cli_opts{v});
+
+print "$VERBOSE\n"; exit;
 
 if (verify_options($options)) {
     print STDERR "required options not provided\n";
@@ -66,11 +68,11 @@ my $coords = {};
 
 # open the directory containing the gpx files, and loop through each file
 if (opendir GPX_DIR,"$$options{gpx_dir}") {
-    print "reading in gpx files..." if ($VERBOSE);
+    print "reading gpx files: " if ($VERBOSE);
     foreach my $file (grep { /\.gpx$/i } readdir GPX_DIR) {
         read_tracks("$$options{gpx_dir}/$file",$coords);
     }
-    print " done\n" if ($VERBOSE);
+    print "done\n" if ($VERBOSE);
     closedir GPX_DIR;
 } else {
     print STDERR "unable to open GPX dir: $$options{gpx_dir}: $!\n";
@@ -88,7 +90,7 @@ if (opendir SRC_DIR,"$$options{src_dir}") {
         # get the timestamp from the image and add offset to pair with gps
         my $image_ts = str2time($$exif{DateTimeOriginal}) + $offset;
 
-        print "finding location: $$options{src_dir}/$image ..." if ($VERBOSE);
+        print "matching: $$options{src_dir}/$image: " if ($VERBOSE);
         my ($lat,$lon,$ele,$fuzz) = (0,0,0);
         for my $fuzzy (0 .. $$options{error_margin}) {
             unless ($lat && $lon && $ele) {
@@ -101,9 +103,9 @@ if (opendir SRC_DIR,"$$options{src_dir}") {
             }
         }
         if ($lat && $lon) {
-            print " found! $fuzz seconds off\n" if ($VERBOSE);
+            print "found: ${fuzz}s\n" if ($VERBOSE);
         } else {
-            print " not found!\n" if ($VERBOSE);
+            print "not found\n" if ($VERBOSE);
         }
         # create an empty hash reference to hold the information
         my $img_data = {};
@@ -234,6 +236,7 @@ sub query_geonames {
     my $success = 0;
     for (1 .. $retry) {
         last if ($success);
+        print 'geonames: ' if ($VERBOSE);
         my $content = http_get("$url");
         if ($content) {
             my $xml = new XML::Simple (ForceArray => 1);
@@ -247,7 +250,13 @@ sub query_geonames {
             $$img_data{timezone} = $$infos{timezone}[0]{content};
             $success = 1;
         }
-        print "geonames failed!\n" if ($VERBOSE && !$success);
+        if ($VERBOSE) {
+            if ($success) {
+                print "success\n";
+            } else {
+                print "fail\n";
+            }
+        }
         sleep $sleep unless ($success);
     }
 }
@@ -266,6 +275,7 @@ sub query_google {
     my $success = 0;
     for (1 .. $retry) {
         last if ($success);
+        print 'google: ' if ($VERBOSE);
         my $content = http_get("$url");
         if ($content) {
             my $xml = new XML::Simple (ForceArray => 1);
@@ -285,7 +295,13 @@ sub query_google {
             }
             $success = 1;
         }
-        print "google failed!\n" if ($VERBOSE && !$success);
+        if ($VERBOSE) {
+            if ($success) {
+                print "success\n";
+            } else {
+                print "fail\n";
+            }
+        }
         sleep $sleep unless ($success);
     }
 }
