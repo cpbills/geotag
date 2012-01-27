@@ -93,7 +93,10 @@ if (opendir SRC_DIR,"$$options{src_dir}") {
         my $exiftool = new Image::ExifTool;
         my $exif = $exiftool->ImageInfo("$$options{src_dir}/$image");
         # get the timestamp from the image and add offset to pair with gps
-        my $image_ts = str2time($$exif{DateTimeOriginal}) + $offset;
+        my $image_ts = 0;
+        if ($$exif{DateTimeOriginal}) {
+            $image_ts = str2time($$exif{DateTimeOriginal}) + $offset;
+        }
 
         print "matching: $$options{src_dir}/$image: " if ($VERBOSE);
         my ($lat,$lon,$ele,$fuzz) = (0,0,0);
@@ -107,10 +110,12 @@ if (opendir SRC_DIR,"$$options{src_dir}") {
                 $fuzz = "+$fuzzy" if ($lat && $lon);
             }
         }
-        if ($lat && $lon) {
-            print "found: ${fuzz}s\n" if ($VERBOSE);
-        } else {
-            print "not found\n" if ($VERBOSE);
+        if ($VERBOSE) {
+            if ($lat && $lon) {
+                print "found: ${fuzz}s\n";
+            } else {
+                print "not found\n";
+            }
         }
         # create an empty hash reference to hold the information
         my $img_data = {};
@@ -136,15 +141,19 @@ if (opendir SRC_DIR,"$$options{src_dir}") {
 
         # grab and format the camera details from exif
         if ($$options{camera_info}) {
-            my $lens = $$exif{Lens} if ($$exif{Lens});
-            # 70.0-200.0 nooo! 70-200, yes!
-            $lens =~ s/\.0//g;
-            $lens =~ s/\ mm/mm/g;
-            $$img_data{tags}{$lens} = 1;
-
-            my $model = lc($$exif{Model}) if ($$exif{Model});
-            $model =~ s/\b([a-z])/uc($1)/ge;
-            $$img_data{tags}{$model} = 1;
+            my $lens = '';
+            if ($$exif{Lens}) {
+                $lens = $$exif{Lens};
+                # 70.0-200.0 nooo! 70-200, yes!
+                $lens =~ s/\.0//g;
+                $lens =~ s/\ mm/mm/g;
+                $$img_data{tags}{$lens} = 1;
+            }
+            if ($$exif{Model}) {
+                $model = lc($$exif{Model});
+                $model =~ s/\b([a-z])/uc($1)/ge;
+                $$img_data{tags}{$model} = 1;
+            }
         }
 
         # perform our geocoding searches, if we have the data
