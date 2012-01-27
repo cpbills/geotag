@@ -176,7 +176,7 @@ sub update_exif {
     if ($$exif{Aperture}) {
         my $aperture = $$exif{Aperture};
         $aperture =~ s/\.0$//;
-        $$img_data{aperture} = $aperture;
+        $$img_data{aperture} = "f/${aperture}";
     }
     if ($$exif{FocalLength}) {
         my $fl = $$exif{FocalLength};
@@ -233,7 +233,7 @@ sub update_exif {
     # a 'join' and making one large string, because this function seems to
     # have a string length limit.
     foreach my $tag (keys %{$$img_data{tags}}) {
-        $exiftool->SetNewValue('Keywords',"\"$tag\"");
+        $exiftool->SetNewValue('Keywords',"$tag");
     }
     # start building the image description:
     my $header = '';
@@ -254,8 +254,8 @@ sub update_exif {
         $footer .= " + " if ($$img_data{model} && $$img_data{lens});
         $footer .= "$$img_data{lens}" if ($$img_data{model});
         if ($$img_data{lens} && $$img_data{fl}
-                    && ($$img_data{fl} ne $$img_data{lens})) {
-            $footer .= "@ $$img_data{fl}";
+                && ($$img_data{fl} ne (split(/\ /,$$img_data{lens}))[0])) {
+            $footer .= " @ $$img_data{fl}";
         }
     }
     if ($$options{desc_exposure}) {
