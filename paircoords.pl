@@ -88,71 +88,17 @@ my $offset = (($$options{camera_gmt} - $$options{gps_gmt}) * 60 * 60) +
 
 if (opendir SRC_DIR,"$$options{src_dir}") {
     foreach my $image (grep { /\.jpe?g$/i } readdir SRC_DIR) {
+        # create the Really Awesome Hash Ref
+        my $img_data = {};
+        $$img_data{image} = $image;
+
         my $exiftool = new Image::ExifTool;
         my $exif = $exiftool->ImageInfo("$$options{src_dir}/$image");
         # get the timestamp from the image and add offset to pair with gps
-        my $image_ts = 0;
         if ($$exif{DateTimeOriginal}) {
-            $image_ts = str2time($$exif{DateTimeOriginal}) + $offset;
+            $$img_data{time} = str2time($$exif{DateTimeOriginal}) + $offset;
         }
-
-        print "matching: $$options{src_dir}/$image: " if ($VERBOSE);
-        my ($lat,$lon,$ele,$fuzz) = (0,0,0);
-        for my $fuzzy (0 .. $$options{error_margin}) {
-            unless ($lat && $lon && $ele) {
-                ($lat,$lon,$ele) = get_location($image_ts-$fuzzy,$coords);
-                $fuzz = "-$fuzzy" if ($lat && $lon);
-            }
-            unless ($lat && $lon && $ele) {
-                ($lat,$lon,$ele) = get_location($image_ts+$fuzzy,$coords);
-                $fuzz = "+$fuzzy" if ($lat && $lon);
-            }
-        }
-        if ($VERBOSE) {
-            if ($lat && $lon) {
-                print "found: ${fuzz}s\n";
-            } else {
-                print "not found\n";
-            }
-        }
-        # create an empty hash reference to hold the information
-        my $img_data = {};
-
-        # store the coords in our Really Awesome Hash Ref (tm)
-        $$img_data{lat} = $lat;
-        $$img_data{lon} = $lon;
-        $$img_data{ele} = $ele;
-
-        # grab all possible existing tags, then insert into our hash
-        my $tags = '';
-        $tags = join(',',$tags,$$exif{Keywords}) if ($$exif{Keywords});
-        $tags = join(',',$tags,$$exif{keywords}) if ($$exif{keywords});
-        $tags = join(',',$tags,$$exif{Subject}) if ($$exif{Subject});
-        $tags = join(',',$tags,$$exif{subject}) if ($$exif{subject});
-
-        foreach my $tag (split(/,/,$tags)) {
-            $tag =~ s/\s+$//;
-            $tag =~ s/^\s+//;
-            next if ($tag =~ /^$/);
-            $$img_data{tags}{$tag} = 1;
-        }
-
-        # grab and format the camera details from exif
-        if ($$options{camera_info}) {
-            my $lens = '';
-            if ($$exif{Lens}) {
-                $lens = $$exif{Lens};
-                # 70.0-200.0 nooo! 70-200, yes!
-                $lens =~ s/\.0//g;
-                $lens =~ s/\ mm/mm/g;
-                $$img_data{tags}{$lens} = 1;
-            }
-            if ($$exif{Model}) {
-                $model = lc($$exif{Model});
-                $model =~ s/\b([a-z])/uc($1)/ge;
-                $$img_data{tags}{$model} = 1;
-            }
-        }
+        find_coords($img_data,$options,$coords);
 
         # perform our geocoding searches, if we have the data
         if ($$img_data{lat} && $$img_data{lon}) {
@@ -165,8 +111,8 @@ if (opendir SRC_DIR,"$$options{src_dir}") {
             sleep $$options{sleep};
         }
 
-        # finally, write all this junk into the EXIF header of the image
-        write_exif($img_data,$image,$options);
+        # finally, process and update the EXIF header of the image
+        update_exif($img_data,$image,$options);
     }
     closedir SRC_DIR;
 } else {
@@ -176,7 +122,7 @@ if (opendir SRC_DIR,"$$options{src_dir}") {
 
 exit;
 
-sub write_exif {
+sub update_exif {
     my $img_data    = shift;
     my $image       = shift;
     my $options     = shift;
@@ -195,6 +141,50 @@ sub write_exif {
 
     my $exiftool = new Image::ExifTool;
     my $exif = $exiftool->ImageInfo("$filename");
+
+    # grab all possible existing tags, then insert into our hash
+    my $tags = '';
+    $tags = join(',',$tags,$$exif{Keywords}) if ($$exif{Keywords});
+    $tags = join(',',$tags,$$exif{keywords}) if ($$exif{keywords});
+    $tags = join(',',$tags,$$exif{Subject}) if ($$exif{Subject});
+    $tags = join(',',$tags,$$exif{subject}) if ($$exif{subject});
+
+    foreach my $tag (split(/,/,$tags)) {
+        $tag =~ s/\s+$//;
+        $tag =~ s/^\s+//;
+        next if ($tag =~ /^$/);
+        $$img_data{tags}{$tag} = 1;
+    }
+
+    # grab and format the camera and exposure details from exif
+    if ($$exif{Lens}) {
+        my $lens = $$exif{Lens};
+        # 70.0-200.0 nooo! 70-200, yes!
+        $lens =~ s/\.0//g;
+        $lens =~ s/\ mm/mm/g;
+        $$img_data{lens} = $lens;
+    }
+    if ($$exif{Model}) {
+        my $model = lc($$exif{Model});
+        $model =~ s/\b([a-z])/uc($1)/ge;
+        $$img_data{model} = $model;
+    }
+    if ($$exif{ShutterSpeed}) {
+        my $shutter = $$exif{ShutterSpeed} . 's';
+        $$img_data{shutter} = $shutter;
+    }
+    if ($$exif{Aperture}) {
+        my $aperture = $$exif{Aperture};
+        $aperture =~ s/\.0$//;
+        $$img_data{aperture} = $aperture;
+    }
+    if ($$exif{FocalLength}) {
+        my $fl = $$exif{FocalLength};
+        $fl =~ s/\.0\b//;
+        $fl =~ s/\ mm/mm/;
+        $$img_data{fl} = $fl;
+    }
+    $$img_data{iso} = $$exif{ISO} if ($$exif{ISO});
 
     if ($$img_data{lat} && $$img_data{lon}) {
         my $lat = $$img_data{lat};
@@ -273,6 +263,43 @@ sub query_geonames {
     }
 }
 
+sub find_coords {
+    my $img_data    = shift;
+    my $options     = shift;
+    my $coords      = shift;
+
+    print "matching: $$options{src_dir}/$$img_data{image}: " if ($VERBOSE);
+    unless ($$img_data{time}) {
+        print "not found: no image time\n" if ($VERBOSE);
+        return;
+    }
+    for my $fuzzy (0 .. $$options{error_margin}) {
+        # if someone knows of a more 'efficient' way to express this flip-flop
+        # please let me know... i hate redundant code... although, i imagine
+        # there is a lot of it in this script already...
+        my $time = $$img_data{time}-$fuzzy;
+        if ($$coords{$time}) {
+            my $location = $$coords{$time};
+            $$img_data{lat} = $$location{lat};
+            $$img_data{lon} = $$location{lon};
+            $$img_data{ele} = $$location{ele};
+            print "found: -${fuzzy}s\n" if ($VERBOSE);
+            return;
+        }
+        $time = $$img_data{time}+$fuzzy;
+        if ($$coords{$time}) {
+            my $location = $$coords{$time};
+            $$img_data{lat} = $$location{lat};
+            $$img_data{lon} = $$location{lon};
+            $$img_data{ele} = $$location{ele};
+            print "found: +${fuzzy}s\n" if ($VERBOSE);
+            return;
+        }
+    }
+    print "not found\n" if ($VERBOSE);
+    return;
+}
+
 sub query_google {
     # example query:
     # http://maps.googleapis.com/maps/api/geocode/xml?latlng=34.520994,-117.308356&sensor=false
@@ -318,16 +345,7 @@ sub query_google {
     }
 }
 
-sub get_location {
-    my $time    =   shift;
-    my $coords  =   shift;
 
-    if ($$coords{$time}{lat} && $$coords{$time}{lon} && $$coords{$time}{ele}) {
-        return ($$coords{$time}{lat},$$coords{$time}{lon},$$coords{$time}{ele});
-    } else {
-        return (0,0,0);
-    }
-}
 
 sub http_get {
     my $url     = shift;
