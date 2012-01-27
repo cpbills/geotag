@@ -61,8 +61,6 @@ $$options{src_dir} = $cli_opts{s} if ($cli_opts{s});
 $$options{dst_dir} = $cli_opts{d} if ($cli_opts{d});
 $VERBOSE = $cli_opts{v} if ($cli_opts{v});
 
-print "$VERBOSE\n"; exit;
-
 if (verify_options($options)) {
     print STDERR "required options not provided\n";
     exit 1;
