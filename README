@@ -8,11 +8,14 @@ locating the nearest city/feature name and using that in the tags.
 unfortunately, it would wipe all other exif tags from the image, and that
 was not good... so i wrote this.
 
-features:
-seconds offset definable in code (config file coming?)
-timezone / gmt offset configurable
-finds nearest city/location and adds exif info
-takes other exif info, and creates tags for it (lens, camera, etc)
+still not extremely user friendly, mostly meant for myself and portfolio...
+but if you're a tinkerer, feel free to fork it and play around... i'm
+interested in any constructive feedback...
 
-possibly more, it's been a long while since i touched this code... i'll be
-lucky if the place-name lookup still functions...
+features:
+- config file. yay, you can set all sorts of options!
+- configurable for down-to-the-second accuracy, depending on the
+  frequency your GPSr records your location
+- queries geonames.org and google maps for geocoding information
+- injects all sorts of information into your exif tags...
+- generates a nice description for flickr (not so true for picasa...)
