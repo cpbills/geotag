@@ -401,8 +401,6 @@ sub query_google {
     }
 }
 
-
-
 sub http_get {
     my $url     = shift;
 
@@ -465,7 +463,6 @@ sub verify_options {
     }
     return $fail;
 }
-
 
 sub read_options {
     my $config  = shift;
