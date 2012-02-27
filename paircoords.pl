@@ -431,10 +431,12 @@ sub read_tracks {
     foreach my $segment (@$segments) {
         my $points = $$segment{trkseg}[0]{trkpt};
         foreach my $point (@$points) {
-            my $time = str2time($$point{time}[0]);
-            $$coord_hash{$time}{lat} = $$point{lat};
-            $$coord_hash{$time}{lon} = $$point{lon};
-            $$coord_hash{$time}{ele} = $$point{ele}[0];
+            if (defined $$point{time}[0]) {
+                my $time = str2time($$point{time}[0]);
+                $$coord_hash{$time}{lat} = $$point{lat};
+                $$coord_hash{$time}{lon} = $$point{lon};
+                $$coord_hash{$time}{ele} = $$point{ele}[0];
+            }
         }
     }
 }
