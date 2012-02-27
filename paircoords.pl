@@ -269,6 +269,11 @@ sub update_exif {
         }
     }
     $footer .= "\n" if ($footer ne '');
+    if ($$options{gmaps_link} && $$img_data{lat} && $$img_data{lon}) {
+        # testing...
+        $footer .= "\n" if ($footer ne '');
+        $footer .= qq{<a href="http://maps.google.com/?ll=$$img_data{lat},$$img_data{lon}">google maps</a>};
+    }
     if ($$options{desc_copyright} && $$options{copyright}) {
         $$options{copyright} =~ s/\\n/\n/g;
         $footer .= "$$options{copyright}";

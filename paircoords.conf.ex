@@ -20,6 +20,9 @@ desc_exposure       1
 # display copyright notice in image description
 desc_copyright      1
 
+# provide a link to google maps, if coords were found
+gmaps_link          1
+
 # copyright notice to put in the image description
 copyright           Copyright © 2012 John User. All rights reserved.
 
