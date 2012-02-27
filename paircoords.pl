@@ -413,7 +413,7 @@ sub http_get {
     if ($response->is_success) {
         return $response->content;
     }
-    return 0;
+    return undef;
 }
 
 sub read_tracks {
