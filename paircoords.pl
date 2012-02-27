@@ -36,6 +36,7 @@ if ($^O =~ /mswin/i) {
 } else {
     @config_path = ( "/etc/${config_name}",
                      "$ENV{HOME}/.${config_name}",
+                     "$ENV{HOME}/.config/${config_name}",
                      "./${config_name}" );
 }
 my $options_file = '';
