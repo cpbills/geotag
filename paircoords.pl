@@ -96,7 +96,7 @@ if (opendir SRC_DIR,"$$options{src_dir}") {
         my $exif = $exiftool->ImageInfo("$$options{src_dir}/$image");
         # get the timestamp from the image and add offset to pair with gps
         if ($$exif{DateTimeOriginal}) {
-            $$img_data{time} = str2time($$exif{DateTimeOriginal}) + $offset;
+            $$img_data{time} = str2time("$$exif{DateTimeOriginal}Z") + $offset;
         }
         find_coords($img_data,$options,$coords);
 
