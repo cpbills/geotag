@@ -268,8 +268,8 @@ sub update_exif {
             $footer .= join(', ',@details);
         }
     }
-    $footer .= "\n" if ($footer ne '');
     if ($$options{desc_copyright} && $$options{copyright}) {
+        $footer .= "\n" if ($footer ne '');
         $$options{copyright} =~ s/\\n/\n/g;
         $footer .= "$$options{copyright}";
     }
