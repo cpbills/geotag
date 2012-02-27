@@ -83,7 +83,7 @@ if (opendir GPX_DIR,"$$options{gpx_dir}") {
 }
 
 # calculate the total seconds difference
-my $offset = (($$options{camera_gmt} - $$options{gps_gmt}) * 60 * 60) +
+my $offset = (($$options{gps_gmt} - $$options{camera_gmt}) * 60 * 60) +
                 $$options{sync_seconds};
 
 if (opendir SRC_DIR,"$$options{src_dir}") {
