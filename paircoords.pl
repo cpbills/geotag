@@ -414,7 +414,7 @@ sub http_get {
     if ($response->is_success) {
         return $response->content;
     }
-    return undef;
+    return;
 }
 
 sub read_tracks {
@@ -472,8 +472,8 @@ sub read_options {
 
     my %options = ();
 
-    if (open FILE,'<',$config) {
-        while (<FILE>) {
+    if (open my $conf_fh,'<',$config) {
+        while (<$conf_fh>) {
             my $line = $_;
             $line =~ s/^\s+//;
             $line =~ s/\s+$//;
@@ -486,7 +486,7 @@ sub read_options {
             }
             $options{$option} = $value;
         }
-        close FILE;
+        close $conf_fh;
     } else {
         print STDERR "could not open file: $config: $!\n";
     }
